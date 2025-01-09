@@ -10,8 +10,8 @@ class Rest_API:
             "Language": "en_US"
             }
         self.url = "http://10.52.17.100/api/v2.0.0/"
-        self.positions = {} # Dictionary with the positions names and its guid
-        self.missions = {} # Dictionary with the missions names and its guid
+        self.positions_dict = {} # Dictionary with the positions names and its guid
+        self.missions_dict = {} # Dictionary with the missions names and its guid
     
     def api_request(self, method, endpoint, data = None, custom_url = False):
         """
@@ -34,8 +34,8 @@ class Rest_API:
         response = self.api_request('GET', "missions")
         if response.status_code == 200:
             missions = response.json()  
-            self.missions = {mission["name"]: mission["guid"] for mission in missions}
-            return self.missions
+            self.missions_dict = {mission["name"]: mission["guid"] for mission in missions}
+            return list(self.missions_dict.keys())
         else:
             print("Error fetching missions names:", response.status_code)
 
@@ -48,13 +48,13 @@ class Rest_API:
             positions = response.json()  
             for position in positions:
                 if position["type_id"] == 0 and position["map"] == "/v2.0.0/maps/6bad8aa5-b6e0-11ef-9eaa-b46921170fcf":
-                    self.positions[position["name"]] = position["guid"] 
-            return self.positions
+                    self.positions_dict[position["name"]] = position["guid"] 
+            return list(self.positions_dict.keys())
         else:
             print("Error fetching positions:", response.status_code)
 
     def execute_mission(self, mission_name):
-        body = {"mission_id": self.missions[mission_name]}
+        body = {"mission_id": self.missions_dict[mission_name]}
         response = self.api_request('POST', "mission_queue", body )
         if response.status_code == 201:
             print("Mission '%s' sent successfully to robot" % (mission_name))
@@ -67,7 +67,7 @@ class Rest_API:
                 "parameters":[
                     {
                         "id": "Position",
-                        "value": self.positions[position_name]
+                        "value": self.positions_dict[position_name]
                     }
                 ]}
         response = self.api_request('POST', 'mission_queue', body)

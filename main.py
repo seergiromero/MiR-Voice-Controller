@@ -1,6 +1,10 @@
 from Whisper_Live import Whisper_Live
 from transcript_post_processing import PostProcessing
 from rest import Rest_API
+import spacy
+
+
+
 
 
 def main():
@@ -15,16 +19,19 @@ def main():
 
     #    wl.get_transcription()
     #    print("------- Hold spacebar to start recording -------")
+    pp = PostProcessing()
+    while True:
+ 
 
-    #pp = PostProcessing()
-    #pp.analyze_phrase("MoVe to the position A", "go")
 
-    ra = Rest_API()
-    ra.select_robot("mir200")
-    print(ra.get_positions())
-    print(ra.get_missions())
-    ra.execute_mission("footprint")
-    ra.go_to("POS1")
+        phrase = str(input("Send an order: "))
+        pp.run_model(phrase)
+
+        
+        
+        
+  
+
 if __name__ == "__main__":
 
     main()
