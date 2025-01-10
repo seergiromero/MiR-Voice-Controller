@@ -1,86 +1,213 @@
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, List, Optional, Union, Callable, TypedDict, Any
 import requests
+from requests import Response
 import json
+from urllib.parse import urljoin
 
+class RobotType(Enum):
+    SUPERMAN = ("mir200", "http://10.52.17.100/api/v2.0.0/")
+    BATMAN = ("mir250", "http://10.52.17.136/api/v2.0.0/")
 
-class Rest_API:
-    def __init__(self):
-        self.headers = {
+class Position(TypedDict):
+    guid: str
+    url: str
+    name: str
+    map: str
+    type_id: int
+    
+class Mission(TypedDict):
+    name: str
+    guid: str
+
+@dataclass
+class MissionParameter:
+    id: str
+    value: str
+
+class RobotAPI:
+    """
+    API client for MiR robots
+    """
+    
+    GOTO_GUID: str = "mirconst-guid-0000-0001-actionlist00"
+    GOTO_CHARGER_GUID: str = "mirconst-guid-0000-0004-actionlist00"
+    DEFAULT_MAP: str = "/v2.0.0/maps/6bad8aa5-b6e0-11ef-9eaa-b46921170fcf"
+    
+    def __init__(self, robot_type: RobotType = RobotType.SUPERMAN) -> None:
+        self._headers: Dict[str, str] = {
             "Authorization": "Basic ZGlzdHJpYnV0b3I6NjJmMmYwZjFlZmYxMGQzMTUyYzk1ZjZmMDU5NjU3NmU0ODJiYjhlNDQ4MDY0MzNmNGNmOTI5NzkyODM0YjAxNA==",
             "Content-Type": "application/json",
             "Language": "en_US"
-            }
-        self.url = "http://10.52.17.100/api/v2.0.0/"
-        self.positions_dict = {} # Dictionary with the positions names and its guid
-        self.missions_dict = {} # Dictionary with the missions names and its guid
-    
-    def api_request(self, method, endpoint, data = None, custom_url = False):
+        }
+        self._base_url: str = robot_type.value[1]
+        self.positions_robot: Dict[str, str] = {}
+        self.missions_robot: Dict[str, str] = {}
+        
+        # Initialize data
+        self._load_initial_data()
+
+    def _load_initial_data(self) -> None:
         """
-        Function to automate the process of sending an api_request
+        Load initial positions and missions data
         """
-        url_complete = endpoint if custom_url else self.url + endpoint
-        request_method = {
+
+        self.get_missions()
+        self.get_positions()
+
+    def _make_request(
+        self, 
+        method: str, 
+        endpoint: str, 
+        data: Optional[Dict[str, Any]] = None
+    ) -> Response:
+        """
+        Make an HTTP request to the robot API
+        
+        Args:
+            method: HTTP method to use
+            endpoint: API endpoint
+            data: Optional data to send with the request
+            
+        Returns:
+            Response object from the request
+            
+        Raises:
+            requests.RequestException: If the request fails
+        """
+        url = urljoin(self._base_url, endpoint)
+        
+        request_methods: Dict[str, Callable] = {
             'GET': requests.get,
             'POST': requests.post,
             'DELETE': requests.delete,
             'PUT': requests.put
         }
-        response = request_method[method](url_complete, headers=self.headers, data=json.dumps(data) if data else None)
-        return response
+        
+        if method not in request_methods:
+            raise ValueError(f"Invalid HTTP method: {method}")
+            
+        try:
+            return request_methods[method](
+                url=url,
+                headers=self._headers,
+                json=data
+            )
+        except requests.RequestException as e:
+            raise requests.RequestException(f"Request failed: {str(e)}")
 
-    def get_missions(self):
+    def get_missions(self) -> List[str]:
         """
-        Get the missions names from the robot
+        Get available mission names from the robot.
+        
+        Returns:
+            List of mission names
+            
+        Raises:
+            requests.RequestException: If the request fails
         """
-        response = self.api_request('GET', "missions")
-        if response.status_code == 200:
-            missions = response.json()  
-            self.missions_dict = {mission["name"]: mission["guid"] for mission in missions}
-            return list(self.missions_dict.keys())
-        else:
-            print("Error fetching missions names:", response.status_code)
+        try:
+            response = self._make_request('GET', "missions")
+            response.raise_for_status()
+            
+            missions: List[Mission] = response.json()
+            self.missions_robot = {mission["name"]: mission["guid"] for mission in missions}
+            
+            return list(self.missions_robot.keys())
+            
+        except requests.RequestException as e:
+            print(f"Error fetching missions: {str(e)}")
+            return []
 
-    def get_positions(self):
+    def get_positions(self) -> List[str]:
         """
-        Get all the positions that are configured on the map
+        Get configured position names from the robot
+        
+        Returns:
+            List of position names
+            
+        Raises:
+            requests.RequestException: If the request fails
         """
-        response = self.api_request('GET', "positions")
-        if response.status_code == 200:
-            positions = response.json()  
-            for position in positions:
-                if position["type_id"] == 0 and position["map"] == "/v2.0.0/maps/6bad8aa5-b6e0-11ef-9eaa-b46921170fcf":
-                    self.positions_dict[position["name"]] = position["guid"] 
-            return list(self.positions_dict.keys())
-        else:
-            print("Error fetching positions:", response.status_code)
+        try:
+            response = self._make_request('GET', "positions")
+            response.raise_for_status()
+            
+            positions: List[Position] = response.json()
+            self.positions_robot = {
+                pos["name"]: [pos["guid"], pos["type_id"]]
+                for pos in positions
+                if pos["type_id"] in [0,7] and pos["map"] == self.DEFAULT_MAP
+            }
+            return list(self.positions_robot.keys())
+            
+        except requests.RequestException as e:
+            print(f"Error fetching positions: {str(e)}")
+            return []
 
-    def execute_mission(self, mission_name):
-        body = {"mission_id": self.missions_dict[mission_name]}
-        response = self.api_request('POST', "mission_queue", body )
-        if response.status_code == 201:
-            print("Mission '%s' sent successfully to robot" % (mission_name))
-        else:
-            print("Error sending the mission to the robot:", response.status_code)
+    def execute_mission(self, mission_name: str) -> bool:
+        """
+        Execute a specific mission
+        
+        Args:
+            mission_name: Name of the mission to execute
+            
+        Returns:
+            True if mission was sent successfully, False otherwise
+        """
+        if mission_name not in self.missions_robot:
+            print(f"Mission '{mission_name}' not found")
+            return False
+            
+        try:
+            response = self._make_request(
+                'POST', 
+                "mission_queue",
+                {"mission_id": self.missions_robot[mission_name]}
+            )
+            response.raise_for_status()
+            
+            print(f"Mission '{mission_name}' sent successfully to robot")
+            return True
+            
+        except requests.RequestException as e:
+            print(f"Error executing mission: {str(e)}")
+            return False
 
-    def go_to(self, position_name):
-        goto_guid = "mirconst-guid-0000-0001-actionlist00"
-        body = {"mission_id": goto_guid,
-                "parameters":[
-                    {
-                        "id": "Position",
-                        "value": self.positions_dict[position_name]
-                    }
-                ]}
-        response = self.api_request('POST', 'mission_queue', body)
-        if response.status_code == 201:
-            print("Robot sent to position '%s'" % (position_name))
-        else:
-            print("Error sending the mission to the robot:", response.status_code)
+    def go_to(self, position_name: str) -> bool:
+        """
+        Send robot to a specific position
+        
+        Args:
+            position_name: Name of the position to go to
+            
+        Returns:
+            True if command was sent successfully, False otherwise
+        """
+        if position_name not in self.positions_robot:
+            print(f"Position '{position_name}' not found")
+            return False
+        
+        mission_id = self.GOTO_GUID if self.positions_robot[position_name][1] == 0 else self.GOTO_CHARGER_GUID
+        position_id = "Position" if mission_id == self.GOTO_GUID else "chargingStationPosition"
 
-    def select_robot(self, robot):
-        match robot:
-            case "mir200":
-                self.url = "http://10.52.17.100/api/v2.0.0/"
-                print("MiR200 selected")
-            case "mir250":
-                self.url = "http://10.52.17.136/api/v2.0.0/"
-                print("MiR250 selected")
+        try:
+            body = {
+                "mission_id": mission_id,
+                "parameters": [
+                    MissionParameter(
+                        id=position_id,
+                        value=self.positions_robot[position_name][0]
+                    ).__dict__
+                ]
+            }
+            response = self._make_request('POST', 'mission_queue', body)
+            response.raise_for_status()
+            
+            print(f"Robot sent to position '{position_name}'")
+            return True
+            
+        except requests.RequestException as e:
+            print(f"Error sending robot to position: {str(e)}")
+            return False

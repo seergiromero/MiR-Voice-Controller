@@ -1,123 +1,170 @@
 import spacy
 from rapidfuzz import process
-from rest import Rest_API
+from rest import RobotAPI
+from dataclasses import dataclass
+from typing import Optional, Dict, List, Tuple, Callable
+from rest import RobotType
 
-class PostProcessing(Rest_API):
 
-    def __init__(self, debug=False):
+@dataclass
+class NLPResult:
+    instruction: Optional[str]
+    position: Optional[List[str]]
+    mission: Optional[List[str]]
+
+class PostProcessing(RobotAPI):
+
+    SIMILARITY_THRESHOLD = 0.6
+    FUZZY_MATCH_THRESHOLD = 70
+    BASIC_INSTRUCTIONS = ["go", "execute", "send"]    
+
+    def __init__(self, debug=False, robot_type: RobotType = RobotType.SUPERMAN):
 
         # Call the init from Rest_Api class
-        super().__init__()
+        super().__init__(robot_type)
 
         # Load english spaCy model
-        self.nlp = spacy.load('en_core_web_lg')
-        self.instructions = ["go", "execute", "send", "move"]
-        self.instructions_nlp = [self.nlp(inst) for inst in self.instructions]
-        self.positions = self.get_positions()
-        self.missions = self.get_missions()
+        try:
+            self.nlp = spacy.load('en_core_web_lg')
+        except OSError:
+            raise RuntimeError("Failed to load spaCy model. Please install it with: python -m spacy download en_core_web_lg")
+
+        self.instructions_nlp = [self.nlp(inst) for inst in self.BASIC_INSTRUCTIONS]
         self.debug = debug
-        self.instruction = ""
-        self.position = []
-        self.mission = []
+        self.load_initial_data()
+    
+    def load_initial_data(self) -> None:
+        """
+        Initial load of positions and missions data
+        """
+        self.positions = self.get_positions() or []
+        self.missions = self.get_missions() or []
+        if self.debug:
+            print(f"Loaded {len(self.positions)} positions and {len(self.missions)} missions")
 
-    def normalize_phrase(self, phrase):
-        '''
-        Normalize the phrase by making it lower 
-        '''
-        return phrase.lower()
+    def normalize_phrase(self, phrase: str) -> str:
+        """
+        Normalize the phrase by making it lower and removing extra spaces   
+        """
+        return ' '.join(phrase.lower().split())
 
-    def detect_synonyms(self, verbs):
+    def detect_synonyms(self, verbs: List[str]) -> Optional[str]:
         """
         Detect works that could be synonims of "go" in the phrase using
         spaCy model in english
         """
         
+        if not verbs:
+            return None
+
         for verb in verbs:
             # Reference verb
             verb_nlp = self.nlp(verb)
-
+            similarities = [(instruction.text, instruction.similarity(verb_nlp)) 
+                          for instruction in self.instructions_nlp]
+            
             # Look for synonyms
-            for instruction in self.instructions_nlp:
-                instruction = self.nlp(instruction)
-                similarity = instruction.similarity(verb_nlp)
-                if similarity > 0.6:  # Similarity threshold
-                    if self.debug: print(f"- {instruction} (similarity: {round(similarity, 2)})")
-                    return instruction
-                    
-        return None 
+            best_match = max(similarities, key=lambda x: x[1])
+            if best_match[1] > self.SIMILARITY_THRESHOLD:
+                if self.debug:
+                    print(f"Found synonym: {verb} -> {best_match[0]} (similarity: {round(best_match[1], 2)})")
+                return best_match[0]
+            
+        return None
         
-    def extract_tokens(self, phrase):
-        '''
+    def extract_tokens(self, phrase: str) -> Tuple[List[str], List[str]]:
+        """
         Function to extract the important verbs and words from the phrase
-        '''
+        """
         doc = self.nlp(phrase)
 
         verbs = [token.lemma_ for token in doc if token.pos_ == "VERB"]
-        words = [token.text for token in doc if token.ent_type_ in ["LOC", "ORG", "GPE"] or token.pos_ in ["PROPN", "NOUN"] or token.dep_ in ["acomp", "relcl"]]
+        words = [token.text for token in doc if 
+                token.ent_type_ in ["LOC", "ORG", "GPE"] or 
+                token.pos_ in ["PROPN", "NOUN"] or 
+                token.dep_ in ["acomp", "relcl"]]
+        possible_robot = [token.text for token in doc if token.pos_ == "NOUN"]
 
-        return verbs, words
+        return verbs, words, possible_robot
 
-    def find_relation(self, tokens, data):
-        '''
+    def find_relation(self, tokens: List[str], data: List[str]) -> Optional[List[str]]:
+        """
         Find a word that has a high relation with one word from data
-        '''
+        """
+        if not tokens or not data:
+            return None
+        
         matches = []
         for token in tokens:
             match, score, _ = process.extractOne(token, data)
-            if score > 70:
+            if score > self.FUZZY_MATCH_THRESHOLD:
                 matches.append(match)
         return matches if matches else None
     
-    def normalize_instruction(self):
-        self.instruction = str(self.instruction)
+    def select_robot(self, possible_robot: str) -> None:
+        for robot in possible_robot:
+            robot_enum = getattr(RobotType, robot.upper(), None)
+            if robot_enum:
+                self._base_url = robot_enum.value[1]
+                print(f"Robot {robot_enum.value[0]} selected")
 
-        self.instruction = 'go' if self.instruction == 'send' else self.instruction
-        self.instruction = 'go' if self.instruction == 'move' else self.instruction
-
-    def select_mission(self):
+    def analyze_phrase(self, phrase: str) -> NLPResult:
         """
-        Function to select a specific mission in case of multiple choice.
-        """
-        if len(self.mission) > 1:
-            print("More than one coincidence has been detected, select the mission you want to execute:")
-            for i, mission in enumerate(self.mission):
-                print(f"{i}. {mission}")
-            result = int(input("Select the number of the mission you want to execute: "))
-            return self.mission[result]
-        return self.mission[0]  # In case there is only one mission, return it directly
-
-    def run_model(self, phrase):
-        self.analyze_phrase(phrase)
-        self.normalize_instruction()
-        actions = {
-            'go': lambda: self.go_to(self.position[0]) if self.position[0] else print("No position found."),
-            'execute': lambda: self.execute_mission(self.select_mission())
-        }
-
-        if self.instruction in actions:
-            actions[self.instruction]()
-        else:
-            print("Instruction not recognized.")
-        
-    def analyze_phrase(self, phrase):
-        '''
         Extract the positions, instructions and missions from the phrase
-        '''
-
+        """
         phrase = self.normalize_phrase(phrase)
-        verbs, words = self.extract_tokens(phrase)
+        verbs, words, possible_robot = self.extract_tokens(phrase)
+        if possible_robot: self.select_robot(possible_robot)
 
         if self.debug:
             print("Verbs detected:", verbs)
             print("Words detected:", words)
 
-        self.instruction = self.detect_synonyms(verbs)
-        print(self.positions)
-        print(self.missions)
-        self.position = self.find_relation(words, self.positions)
-        self.mission = self.find_relation(words, self.missions)
+        instruction = self.detect_synonyms(verbs)
+        position = self.find_relation(words, self.positions)
+        mission = self.find_relation(words, self.missions)
 
         if self.debug:
-            print("Instruction found:", self.instruction)
-            print("Position found:", self.position)
-            print("Mission found:", self.mission)
+            print(f"Analysis results - Instruction: {instruction}, Position: {position}, Mission: {mission}")
+        
+        return NLPResult(instruction, position, mission)
+
+    def select_mission(self, missions: List[str]) -> Optional[str]:
+        """
+        Function to select a specific mission in case of multiple choice.
+        """
+        if not missions:
+            return None
+        if len(missions) == 1:
+            return missions[0] # In case there is only one mission, return it directly
+
+        print("\nMore than one coincidence has been detected, select the mission you want to execute:")
+        for i, mission in enumerate(missions):
+            print(f"{i}. {mission}")
+        
+        try:
+            selection = int(input("\nSelect the number of the mission you want to execute: "))
+            if 0 <= selection < len(missions):
+                return missions[selection]
+        except ValueError:
+            print("Selección inválida")
+        return None
+
+    def run_model(self, phrase: str) -> None:
+        result = self.analyze_phrase(phrase)
+
+        if not result.instruction:
+            print("No instruction found.")
+            return
+        normalized_instruction = 'go' if result.instruction in ['send', 'move'] else result.instruction
+        actions: Dict[str, Callable] = {
+            'go': lambda: self.go_to(result.position[0]) if result.position else print("No se encontró una posición válida."),
+            'execute': lambda: self.execute_mission(self.select_mission(result.mission)) if result.mission else print("No se encontró una misión válida.")
+        }
+
+        action = actions.get(normalized_instruction)
+        if action:
+            action()
+        else:
+            print(f"Instruction not recognized: {normalized_instruction}")
+    
