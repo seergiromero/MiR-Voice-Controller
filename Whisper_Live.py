@@ -6,7 +6,6 @@ import pyaudio
 import numpy as np
 from pynput import keyboard
 import tempfile
-from typing import NDArray
 
 class Whisper_Live:
     """
@@ -51,7 +50,7 @@ class Whisper_Live:
         self.rate = int(device_info['defaultSampleRate'])
         self.channels = int(device_info['maxInputChannels'])
     
-    def record(self) -> NDArray[float]: 
+    def record(self): 
         """
         Function to record audio when the user presses the space bar
         """
