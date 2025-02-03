@@ -18,10 +18,11 @@ class Whisper_Live:
        - Once transcripted, the temporary file will be deleted.
     """
 
-    def __init__(self, model_size="small", device_id=15) -> None:
+    def __init__(self, model_size="large", device_id=15) -> None:
         """
         Init function, select the type of model and the device to be used as a microphone
         """
+
         # Fast Whisper Model AI
         self.model = WhisperModel(model_size, device="cpu", compute_type="int8")
 
@@ -37,6 +38,7 @@ class Whisper_Live:
         """
         Function to list all the devices and check the available microphones
         """
+
         print("Available audio devices:")
         for i in range(self.audio.get_device_count()):
             info = self.audio.get_device_info_by_index(i)
@@ -46,6 +48,7 @@ class Whisper_Live:
         """
         Function to select the device to use
         """
+
         device_info = self.audio.get_device_info_by_index(device_id)
         self.rate = int(device_info['defaultSampleRate'])
         self.channels = int(device_info['maxInputChannels'])
@@ -78,6 +81,10 @@ class Whisper_Live:
 
     # Functions to change is_recording value when space bar is pressed
     def start_recording(self, key) -> None:
+        """
+        Function to start recording when the space bar is pressed
+        """
+
         if key == keyboard.Key.space:
             if not self.is_recording:
                 self.is_recording = True
@@ -85,6 +92,10 @@ class Whisper_Live:
 
 
     def stop_recording(self, key) -> None:
+        """
+        Function to stop recording when the space bar is pressed again
+        """
+
         if key == keyboard.Key.space:
             if self.is_recording:
                 self.is_recording = False
@@ -94,6 +105,7 @@ class Whisper_Live:
         """
         Function to generate the temporary file
         """
+
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
         write(temp_file.name, self.rate, recording)
         return temp_file.name
@@ -103,6 +115,7 @@ class Whisper_Live:
         """
         Function to transcript the temporary file using the AI
         """
+
         segments, info = self.model.transcribe(file_path, beam_size=5)
         print("Language detected: '%s', Probability: '%f'" % (info.language, info.language_probability))
         transcription = ""

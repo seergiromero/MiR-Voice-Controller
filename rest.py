@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 
 class RobotType(Enum):
     SUPERMAN = ("mir200", "http://10.52.17.100/api/v2.0.0/")
-    BATMAN = ("mir250", "http://10.52.17.136/api/v2.0.0/")
+    BATMAN = ("mir250", "http://10.52.17.21/api/v2.0.0/")
 
 class Position(TypedDict):
     guid: str
@@ -41,6 +41,7 @@ class RobotAPI:
             "Content-Type": "application/json",
             "Language": "en_US"
         }
+        self.robot_type: str = robot_type.value[0]
         self._base_url: str = robot_type.value[1]
         self.positions_robot: Dict[str, str] = {}
         self.missions_robot: Dict[str, str] = {}
@@ -76,6 +77,7 @@ class RobotAPI:
         Raises:
             requests.RequestException: If the request fails
         """
+
         url = urljoin(self._base_url, endpoint)
         
         request_methods: Dict[str, Callable] = {
@@ -107,6 +109,7 @@ class RobotAPI:
         Raises:
             requests.RequestException: If the request fails
         """
+
         try:
             response = self._make_request('GET', "missions")
             response.raise_for_status()
@@ -130,15 +133,19 @@ class RobotAPI:
         Raises:
             requests.RequestException: If the request fails
         """
+
         try:
             response = self._make_request('GET', "positions")
             response.raise_for_status()
+
+            if self.robot_type == "mir200" or self.robot_type == "mir100": type_ids = [0, 7]
+            else: type_ids = [0, 20]
             
             positions: List[Position] = response.json()
             self.positions_robot = {
                 pos["name"]: [pos["guid"], pos["type_id"]]
                 for pos in positions
-                if pos["type_id"] in [0,7] and pos["map"] == self.DEFAULT_MAP
+                if pos["type_id"] in type_ids and pos["map"] == self.DEFAULT_MAP
             }
             return list(self.positions_robot.keys())
             
@@ -156,6 +163,7 @@ class RobotAPI:
         Returns:
             True if mission was sent successfully, False otherwise
         """
+
         if mission_name not in self.missions_robot:
             print(f"Mission '{mission_name}' not found")
             return False
@@ -185,6 +193,7 @@ class RobotAPI:
         Returns:
             True if command was sent successfully, False otherwise
         """
+        
         if position_name not in self.positions_robot:
             print(f"Position '{position_name}' not found")
             return False

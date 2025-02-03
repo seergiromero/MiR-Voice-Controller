@@ -32,6 +32,15 @@ class PostProcessing(RobotAPI):
         self.instructions_nlp = [self.nlp(inst) for inst in self.BASIC_INSTRUCTIONS]
         self.debug = debug
         self.load_initial_data()
+
+    def get_data(self) -> None:
+        """
+        Initial load of positions and missions data
+        """
+        self.positions = self.get_positions() or [] # From rest.py
+        self.missions = self.get_missions() or [] # From rest.py
+        if self.debug:
+            print(f"Loaded {len(self.positions)} positions and {len(self.missions)} missions")
     
     def load_initial_data(self) -> None:
         """
@@ -106,6 +115,7 @@ class PostProcessing(RobotAPI):
             robot_enum = getattr(RobotType, robot.upper(), None)
             if robot_enum:
                 self._base_url = robot_enum.value[1]
+                self.robot_type = robot_enum.value[0]
                 print(f"Robot {robot_enum.value[0]} selected")
 
     def analyze_phrase(self, phrase: str) -> NLPResult:
@@ -119,6 +129,8 @@ class PostProcessing(RobotAPI):
         if self.debug:
             print("Verbs detected:", verbs)
             print("Words detected:", words)
+
+        self.get_data()
 
         instruction = self.detect_synonyms(verbs)
         position = self.find_relation(words, self.positions)
@@ -151,15 +163,16 @@ class PostProcessing(RobotAPI):
         return None
 
     def run_model(self, phrase: str) -> None:
-        result = self.analyze_phrase(phrase)
 
+        result = self.analyze_phrase(phrase)
+ 
         if not result.instruction:
             print("No instruction found.")
             return
         normalized_instruction = 'go' if result.instruction in ['send', 'move'] else result.instruction
         actions: Dict[str, Callable] = {
-            'go': lambda: self.go_to(result.position[0]) if result.position else print("No se encontró una posición válida."),
-            'execute': lambda: self.execute_mission(self.select_mission(result.mission)) if result.mission else print("No se encontró una misión válida.")
+            'go': lambda: self.go_to(result.position[0]) if result.position else print("No valid position was found."),
+            'execute': lambda: self.execute_mission(self.select_mission(result.mission)) if result.mission else print("No valid mision was found.")
         }
 
         action = actions.get(normalized_instruction)
